@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Casa do pão francês — Pedidos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-amber-50">
+  <div class="max-w-3xl mx-auto p-4">
+    <header class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-extrabold">Casa do pão francês</h1>
+        <p class="text-gray-700">Pães embalados a vácuo — fresquinhos por mais tempo.</p>
+      </div>
+    </header>
+
+    <section class="p-4 bg-white rounded-xl shadow mb-4">
+      <h2 class="text-lg font-semibold mb-3">Como você quer receber?</h2>
+      <div class="flex gap-6">
+        <label class="flex items-center gap-2">
+          <input type="radio" name="mode" value="delivery" checked onchange="onModeChange()" />
+          <span>Entrega (sempre às sextas-feiras)</span>
+        </label>
+        <label class="flex items-center gap-2">
+          <input type="radio" name="mode" value="pickup" onchange="onModeChange()" />
+          <span>Retirar na loja</span>
+        </label>
+      </div>
+      <p id="infoMode" class="text-sm text-gray-600 mt-2"></p>
+    </section>
+
+    <section id="produtos" class="grid grid-cols-1 gap-4"></section>
+
+    <section class="mt-6 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-2">Carrinho</h2>
+      <div id="carrinho" class="space-y-2 text-sm"></div>
+      <div class="flex justify-between mt-3 font-semibold">
+        <span>Total</span>
+        <span id="total">€ 0,00</span>
+      </div>
+    </section>
+
+    <section class="mt-6 p-4 bg-white rounded-xl shadow">
+      <h2 class="text-xl font-semibold mb-3">Seus dados</h2>
+      <form id="formPedido" class="space-y-3">
+        <input class="w-full border rounded p-2" name="nome" placeholder="Seu nome" required />
+        <input class="w-full border rounded p-2" name="telefone" placeholder="Telefone/WhatsApp" required />
+        <input class="w-full border rounded p-2" name="endereco" id="endereco" placeholder="Endereço (obrigatório para entrega)" />
+        <button class="w-full bg-black text-white rounded p-3 font-medium" type="submit">Finalizar pedido</button>
+        <p class="text-xs text-gray-500">Entrega: sempre às sextas-feiras • Pães em saco a vácuo</p>
+      </form>
+      <p id="msg" class="text-sm mt-3"></p>
+    </section>
+  </div>
+
+  <script>
+    const API = "http://127.0.0.1:8000"; // ajuste ao deploy
+    let produtos = [];
+    let carrinho = [];
+    let mode = "delivery";
+
+    const formatEUR = (v) => new Intl.NumberFormat('pt-PT',{style:'currency',currency:'EUR'}).format(v);
+
+    function onModeChange(){
+      const sel = document.querySelector('input[name="mode"]:checked').value;
+      mode = sel;
+      renderProdutos();
+      renderCarrinho();
+      const info = document.getElementById('infoMode');
+      const end = document.getElementById('endereco');
+      if(mode === "delivery"){
+        info.textContent = "Entrega: 20 pães (2×10) por €14. Entrega sempre na sexta-feira.";
+        end.required = true;
+        end.placeholder = "Endereço (obrigatório para entrega)";
+      } else {
+        info.textContent = "Retirada: pacote de 10 pães por €5.";
+        end.required = false;
+        end.placeholder = "Endereço (opcional para retirada)";
+      }
+      carrinho = [];
+    }
+
+    function renderProdutos(){
+      const grid = document.getElementById('produtos');
+      const filtered = produtos.filter(p => (mode === "delivery" ? p.id === 2 : p.id === 1));
+      grid.innerHTML = filtered.map(p => `
+        <div class="p-4 bg-white rounded-xl shadow flex items-center justify-between">
+          <div>
+            <div class="font-semibold">${p.name}</div>
+            <div class="text-gray-600">${formatEUR(p.price)}</div>
+          </div>
+          <button class="bg-black text-white rounded px-3 py-2" onclick="add(${p.id})">Adicionar</button>
+        </div>
+      `).join('');
+    }
+
+    function renderCarrinho(){
+      const box = document.getElementById('carrinho');
+      const total = document.getElementById('total');
+      box.innerHTML = carrinho.length ? carrinho.map(i => `
+        <div class="flex justify-between items-center">
+          <span>${i.name} × ${i.qty}</span>
+          <div class="flex items-center gap-2">
+            <button class="border rounded px-2" onclick="qty(${i.id},-1)">-</button>
+            <button class="border rounded px-2" onclick="qty(${i.id},+1)">+</button>
+            <span class="w-24 text-right">${formatEUR(i.price*i.qty)}</span>
+          </div>
+        </div>
+      `).join('') : '<div class="text-gray-500">Carrinho vazio.</div>';
+      const soma = carrinho.reduce((s,i)=>s+i.price*i.qty,0);
+      total.textContent = formatEUR(soma);
+    }
+
+    function add(id){
+      const p = produtos.find(x=>x.id===id);
+      const ex = carrinho.find(x=>x.id===id);
+      if(ex) ex.qty++; else carrinho.push({...p, qty:1});
+      renderCarrinho();
+    }
+    function qty(id,delta){
+      const ex = carrinho.find(x=>x.id===id);
+      if(!ex) return;
+      ex.qty += delta;
+      if(ex.qty<=0) carrinho = carrinho.filter(x=>x.id!==id);
+      renderCarrinho();
+    }
+
+    async function carregarProdutos(){
+      try {
+        const res = await fetch(API + "/products");
+        produtos = await res.json();
+        onModeChange();
+        renderProdutos();
+      } catch (e) {
+        document.getElementById('produtos').innerHTML = '<div class="text-red-600">Erro ao carregar produtos.</div>';
+      }
+    }
+
+    document.getElementById('formPedido').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const dados = Object.fromEntries(new FormData(e.target).entries());
+      if(!carrinho.length){
+        document.getElementById('msg').textContent = "Adicione itens antes de finalizar.";
+        return;
+      }
+      try {
+        const res = await fetch(API + "/orders", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            customer: dados,
+            items: carrinho.map(({id,qty})=>({id,qty})),
+            mode
+          })
+        });
+        const out = await res.json();
+        if(out.error){
+          document.getElementById('msg').textContent = "Erro: " + out.error;
+          return;
+        }
+        let extra = "";
+        if(out.mode === "delivery" && out.delivery_date){
+          extra = ` • Entrega: sexta-feira ${new Date(out.delivery_date).toLocaleDateString('pt-BR')}`;
+        } else if(out.mode === "pickup"){
+          extra = " • Retirada na loja";
+        }
+        document.getElementById('msg').textContent = `Pedido #${out.order_id} recebido! Total: ${formatEUR(out.total)}.` + extra;
+        carrinho = [];
+        renderCarrinho();
+      } catch (e) {
+        document.getElementById('msg').textContent = "Erro ao enviar pedido.";
+      }
+    });
+
+    carregarProdutos();
+  </script>
+</body>
+</html>
