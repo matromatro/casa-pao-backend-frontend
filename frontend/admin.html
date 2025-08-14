@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin — Casa do pão francês</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50">
+  <div class="max-w-5xl mx-auto p-4">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Admin — Casa do pão francês</h1>
+      <div class="flex gap-2">
+        <button id="btnRefresh" class="px-3 py-2 rounded bg-black text-white">Atualizar</button>
+        <a id="btnCSV" class="px-3 py-2 rounded border" href="#" target="_blank">Baixar CSV</a>
+      </div>
+    </header>
+
+    <section class="mb-4 p-4 bg-white rounded-xl shadow">
+      <div class="flex items-center gap-3">
+        <label class="text-sm text-gray-700">Backend URL</label>
+        <input id="api" class="border rounded p-2 w-[420px]" placeholder="https://SEU-BACKEND.onrender.com" />
+        <label class="text-sm text-gray-700">Admin Token</label>
+        <input id="token" class="border rounded p-2 w-[260px]" placeholder="***" type="password"/>
+        <button id="btnSalvar" class="px-3 py-2 rounded bg-emerald-600 text-white">Salvar</button>
+      </div>
+      <p class="text-xs text-gray-500 mt-2">Dica: preencha uma vez; fica salvo no seu navegador.</p>
+    </section>
+
+    <section class="p-4 bg-white rounded-xl shadow">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Pedidos</h2>
+        <div class="text-sm text-gray-600">Clique para marcar como <span class="font-semibold">feito</span> ou <span class="font-semibold">pendente</span>.</div>
+      </div>
+      <div id="lista" class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="border-b bg-slate-100">
+              <th class="text-left p-2">#</th>
+              <th class="text-left p-2">Cliente</th>
+              <th class="text-left p-2">Contato</th>
+              <th class="text-left p-2">Endereço</th>
+              <th class="text-left p-2">Modo</th>
+              <th class="text-left p-2">Entrega</th>
+              <th class="text-left p-2">Itens</th>
+              <th class="text-left p-2">Total</th>
+              <th class="text-left p-2">Status</th>
+              <th class="text-left p-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (sel)=>document.querySelector(sel);
+    const apiInput = $("#api");
+    const tokenInput = $("#token");
+    const btnSalvar = $("#btnSalvar");
+    const btnRefresh = $("#btnRefresh");
+    const btnCSV = $("#btnCSV");
+    const tbody = $("#tbody");
+
+    function loadCfg(){
+      apiInput.value = localStorage.getItem("api") || "";
+      tokenInput.value = localStorage.getItem("token") || "";
+      updateCSV();
+    }
+    function saveCfg(){
+      localStorage.setItem("api", apiInput.value.trim());
+      localStorage.setItem("token", tokenInput.value.trim());
+      updateCSV();
+    }
+    function updateCSV(){
+      const api = apiInput.value.trim();
+      if(api){
+        const url = api.replace(/\/+$/,"") + "/orders.csv?limit=1000";
+        btnCSV.href = url;
+        btnCSV.onclick = (e)=>{
+          e.preventDefault();
+          window.open(url, "_blank", "noopener,noreferrer");
+        };
+      }
+    }
+
+    async function carregar(){
+      const api = apiInput.value.trim().replace(/\/+$/,"");
+      const token = tokenInput.value.trim();
+      if(!api || !token){
+        tbody.innerHTML = `<tr><td class="p-3 text-red-600" colspan="10">Preencha Backend URL e Admin Token.</td></tr>`;
+        return;
+      }
+      try{
+        const res = await fetch(api + "/orders", { headers: { "X-Admin-Token": token } });
+        const data = await res.json();
+        if(data.error){
+          tbody.innerHTML = `<tr><td class="p-3 text-red-600" colspan="10">Erro: ${data.error}</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = data.map(o => `
+          <tr class="border-b">
+            <td class="p-2">${o.id}</td>
+            <td class="p-2">${o.customer_name}</td>
+            <td class="p-2">${o.customer_phone}</td>
+            <td class="p-2">${o.customer_address || "-"}</td>
+            <td class="p-2">${o.mode}</td>
+            <td class="p-2">${o.delivery_date || "-"}</td>
+            <td class="p-2">${o.items || "-"}</td>
+            <td class="p-2">€ ${o.total?.toFixed?.(2) ?? o.total}</td>
+            <td class="p-2">
+              <span class="inline-block px-2 py-1 rounded text-white ${o.status==='done'?'bg-emerald-600':'bg-amber-600'}">
+                ${o.status || 'pending'}
+              </span>
+            </td>
+            <td class="p-2">
+              <button class="px-2 py-1 rounded border mr-2" onclick="setStatus(${o.id}, 'done')">Feito</button>
+              <button class="px-2 py-1 rounded border" onclick="setStatus(${o.id}, 'pending')">Pendente</button>
+            </td>
+          </tr>
+        `).join("");
+      }catch(e){
+        tbody.innerHTML = `<tr><td class="p-3 text-red-600" colspan="10">Falha ao carregar pedidos. Verifique URL/token.</td></tr>`;
+      }
+    }
+
+    async function setStatus(id, status){
+      const api = apiInput.value.trim().replace(/\/+$/,"");
+      const token = tokenInput.value.trim();
+      try{
+        await fetch(api + `/orders/${id}/status`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Token": token
+          },
+          body: JSON.stringify({ status })
+        });
+        carregar();
+      }catch(e){
+        alert("Falha ao atualizar status.");
+      }
+    }
+
+    btnSalvar.onclick = ()=>{ saveCfg(); carregar(); };
+    btnRefresh.onclick = ()=> carregar();
+
+    loadCfg();
+    carregar();
+    setInterval(carregar, 10000);
+  </script>
+</body>
+</html>
