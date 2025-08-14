@@ -20,9 +20,30 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*", "X-Admin-Token"],
+    expose_headers=["*"],
 )
+
+# ===== Middleware para logar erros e retornar detalhe (diagnóstico) =====
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+@app.middleware("http")
+async def catch_all_exceptions(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        # log no console do Render
+        import traceback, sys
+        print("### SERVER ERROR ###", file=sys.stderr)
+        traceback.print_exc()
+        # resposta amigável p/ debug no front
+        return JSONResponse({"error": "server", "detail": str(e)}, status_code=500)
+
+# ===== OPTIONS catch-all p/ preflight CORS com header custom =====
+@app.options("/{rest_of_path:path}")
+def options_catch_all(rest_of_path: str = ""):
+    return PlainTextResponse("", status_code=200)
 
 # =====================
 # Banco de dados (SQLite)
@@ -131,13 +152,11 @@ def create_order(payload: OrderIn):
     checkout_url = None  # Stripe desligado no MVP
 
     cur.execute("""INSERT INTO orders(customer_name,customer_phone,customer_address,total,checkout_url,mode,delivery_date,status)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (payload.customer.nome, payload.customer.telefone, payload.customer.endereco or "", total, checkout_url, payload.mode, entrega, "pending"))
+                   VALUES(?,?,?,?,?,?,?,?)""",                (payload.customer.nome, payload.customer.telefone, payload.customer.endereco or "", total, checkout_url, payload.mode, entrega, "pending"))
     order_id = cur.lastrowid
     for it in payload.items:
         _, price = db_products[it.id]
-        cur.execute("INSERT INTO order_items(order_id,product_id,qty,price) VALUES(?,?,?,?)",
-                    (order_id, it.id, it.qty, price))
+        cur.execute("INSERT INTO order_items(order_id,product_id,qty,price) VALUES(?,?,?,?)",                    (order_id, it.id, it.qty, price))
     conn.commit()
 
     return {"order_id": order_id, "total": total, "checkout_url": checkout_url, "mode": payload.mode, "delivery_date": entrega}
@@ -150,47 +169,65 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 def require_admin(x_admin_token: Optional[str] = Header(None)) -> bool:
     return bool(ADMIN_TOKEN) and (x_admin_token == ADMIN_TOKEN)
 
+# Versão SEGURA de /orders (sem GROUP_CONCAT)
 @app.get("/orders")
 def list_orders(x_admin_token: Optional[str] = Header(None), limit: int = 200):
     if not require_admin(x_admin_token):
         return {"error": "unauthorized"}
-    rows = cur.execute("""
-        SELECT o.id, o.customer_name, o.customer_phone, o.customer_address,
-               o.total, o.mode, COALESCE(o.delivery_date,''),
-               COALESCE(o.status,'pending'),
-               GROUP_CONCAT(p.name || ' x' || i.qty, '; ') AS items
-        FROM orders o
-        LEFT JOIN order_items i ON i.order_id = o.id
-        LEFT JOIN products p ON p.id = i.product_id
-        GROUP BY o.id
-        ORDER BY o.id DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
-    cols = ["id","customer_name","customer_phone","customer_address","total","mode","delivery_date","status","items"]
-    return [dict(zip(cols, r)) for r in rows]
+    try:
+        rows = cur.execute("""            SELECT id, customer_name, customer_phone, customer_address,
+                   total, mode, COALESCE(delivery_date,''), COALESCE(status,'pending')
+            FROM orders
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
 
+        orders = []
+        for r in rows:
+            oid, name, phone, addr, total, mode, delivery_date, status = r
+            items_rows = cur.execute("""                SELECT p.name, i.qty
+                FROM order_items i
+                JOIN products p ON p.id = i.product_id
+                WHERE i.order_id = ?
+            """, (oid,)).fetchall()
+            items = "; ".join([f"{n} x{q}" for n, q in items_rows]) if items_rows else ""
+            orders.append({
+                "id": oid,
+                "customer_name": name,
+                "customer_phone": phone,
+                "customer_address": addr,
+                "total": total,
+                "mode": mode,
+                "delivery_date": delivery_date,
+                "status": status or "pending",
+                "items": items,
+            })
+        return orders
+    except Exception as e:
+        return {"error": "server", "detail": str(e)}
+
+# CSV usando a mesma lógica segura (sem GROUP_CONCAT)
 @app.get("/orders.csv")
 def export_orders_csv(x_admin_token: Optional[str] = Header(None), limit: int = 1000):
     if not require_admin(x_admin_token):
         return {"error": "unauthorized"}
-    rows = cur.execute("""
-        SELECT o.id, o.customer_name, o.customer_phone, o.customer_address,
-               o.total, o.mode, COALESCE(o.delivery_date,''),
-               COALESCE(o.status,'pending'),
-               GROUP_CONCAT(p.name || ' x' || i.qty, '; ') AS items
-        FROM orders o
-        LEFT JOIN order_items i ON i.order_id = o.id
-        LEFT JOIN products p ON p.id = i.product_id
-        GROUP BY o.id
-        ORDER BY o.id DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["id","customer_name","customer_phone","customer_address","total","mode","delivery_date","status","items"])
-    for r in rows:
-        writer.writerow(r)
-    return output.getvalue()
+    try:
+        rows = cur.execute(            "SELECT id, customer_name, customer_phone, customer_address, total, mode, COALESCE(delivery_date,''), COALESCE(status,'pending') FROM orders ORDER BY id DESC LIMIT ?",            (limit,)        ).fetchall()
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id","customer_name","customer_phone","customer_address","total","mode","delivery_date","status","items"])
+        for r in rows:
+            oid, name, phone, addr, total, mode, delivery_date, status = r
+            items_rows = cur.execute("""                SELECT p.name, i.qty
+                FROM order_items i
+                JOIN products p ON p.id = i.product_id
+                WHERE i.order_id = ?
+            """, (oid,)).fetchall()
+            items = "; ".join([f"{n} x{q}" for n, q in items_rows]) if items_rows else ""
+            writer.writerow([oid, name, phone, addr, total, mode, delivery_date, status or "pending", items])
+        return output.getvalue()
+    except Exception as e:
+        return {"error": "server", "detail": str(e)}
 
 class StatusIn(BaseModel):
     status: str  # 'done' ou 'pending'
