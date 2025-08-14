@@ -149,3 +149,126 @@ def create_order(payload: OrderIn):
     conn.commit()
 
     return {"order_id": order_id, "total": total, "checkout_url": checkout_url, "mode": payload.mode, "delivery_date": entrega}
+
+# ==== ADIÇÕES PARA ADMIN / STATUS / GOOGLE SHEETS ====
+# Instruções rápidas:
+# 1) No topo do seu backend/app.py garanta que existe:
+#       DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "data.db"))
+# 2) No Render, em Environment:
+#       ADMIN_TOKEN = sua_senha_forte
+#    (Opcional para Google Sheets)
+#       GOOGLE_SHEETS_ID = <ID da planilha>
+#       GOOGLE_SERVICE_ACCOUNT_JSON = <JSON da service account>
+# 3) Cole TODO este arquivo no FINAL do backend/app.py (sem remover o que já existe) e faça deploy.
+# 4) Se quiser enviar pedidos automaticamente para a planilha,
+#    chame _append_to_gsheet(...) no final do POST /orders (exemplo ao final).
+
+import os, csv, io, json
+from typing import Optional
+from fastapi import Header
+from pydantic import BaseModel
+
+# Tenta adicionar a coluna "status" em orders (idempotente)
+try:
+    cur.execute("ALTER TABLE orders ADD COLUMN status TEXT")
+    conn.commit()
+except Exception:
+    pass  # coluna já existe
+
+# --- Autenticação simples por header ---
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+def require_admin(x_admin_token: Optional[str] = Header(None)) -> bool:
+    return bool(ADMIN_TOKEN) and (x_admin_token == ADMIN_TOKEN)
+
+# --- Listar pedidos (com items agregados e status) ---
+@app.get("/orders")
+def list_orders(x_admin_token: Optional[str] = Header(None), limit: int = 200):
+    if not require_admin(x_admin_token):
+        return {"error": "unauthorized"}
+    rows = cur.execute("""
+        SELECT o.id, o.customer_name, o.customer_phone, o.customer_address,
+               o.total, o.mode, COALESCE(o.delivery_date,''),
+               COALESCE(o.status,'pending'),
+               GROUP_CONCAT(p.name || ' x' || i.qty, '; ') AS items
+        FROM orders o
+        LEFT JOIN order_items i ON i.order_id = o.id
+        LEFT JOIN products p ON p.id = i.product_id
+        GROUP BY o.id
+        ORDER BY o.id DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    cols = ["id","customer_name","customer_phone","customer_address","total","mode","delivery_date","status","items"]
+    return [dict(zip(cols, r)) for r in rows]
+
+# --- Exportar CSV ---
+@app.get("/orders.csv")
+def export_orders_csv(x_admin_token: Optional[str] = Header(None), limit: int = 1000):
+    if not require_admin(x_admin_token):
+        return {"error": "unauthorized"}
+    rows = cur.execute("""
+        SELECT o.id, o.customer_name, o.customer_phone, o.customer_address,
+               o.total, o.mode, COALESCE(o.delivery_date,''),
+               COALESCE(o.status,'pending'),
+               GROUP_CONCAT(p.name || ' x' || i.qty, '; ') AS items
+        FROM orders o
+        LEFT JOIN order_items i ON i.order_id = o.id
+        LEFT JOIN products p ON p.id = i.product_id
+        GROUP BY o.id
+        ORDER BY o.id DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id","customer_name","customer_phone","customer_address","total","mode","delivery_date","status","items"])
+    for r in rows:
+        writer.writerow(r)
+    return output.getvalue()
+
+# --- Atualizar status do pedido (done | pending) ---
+class StatusIn(BaseModel):
+    status: str  # 'done' ou 'pending'
+
+@app.post("/orders/{order_id}/status")
+def update_status(order_id: int, payload: StatusIn, x_admin_token: Optional[str] = Header(None)):
+    if not require_admin(x_admin_token):
+        return {"error": "unauthorized"}
+    if payload.status not in ("done", "pending"):
+        return {"error": "invalid status"}
+    cur.execute("UPDATE orders SET status=? WHERE id=?", (payload.status, order_id))
+    conn.commit()
+    return {"ok": True, "id": order_id, "status": payload.status}
+
+# --- (Opcional) Google Sheets: gravar automaticamente cada pedido ---
+GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+
+def _append_to_gsheet(row):
+    """ row: lista de colunas, ex. [id, nome, telefone, endereco, total, mode, entrega, status, items] """
+    if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
+        return
+    try:
+        from google.oauth2.service_account import Credentials
+        import gspread
+        info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        creds = Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+        ws = sh.sheet1
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print("GSHEETS ERROR:", e)
+
+# --- EXEMPLO de uso no seu POST /orders (depois de salvar o pedido) ---
+# _append_to_gsheet([
+#     order_id,
+#     payload.customer.nome,
+#     payload.customer.telefone,
+#     payload.customer.endereco or "",
+#     total,
+#     payload.mode,
+#     entrega or "",
+#     "pending",
+#     "; ".join([f"{db_products[it.id][0]} x{it.qty}" for it in payload.items])
+# ])
+
