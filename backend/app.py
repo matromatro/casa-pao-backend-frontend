@@ -7,6 +7,8 @@ import sqlite3, os, datetime, csv, io, json
 
 # ===== Integração com Google Sheets =====
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
+print("DEBUG SHEETS ID:", GOOGLE_SHEETS_ID)
+
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 
