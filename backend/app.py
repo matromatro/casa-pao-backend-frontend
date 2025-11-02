@@ -5,6 +5,12 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 import sqlite3, os, datetime, csv, io, json
 
+# ===== Integração com Google Sheets =====
+GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "1tJW5BHQTq3a5O1w-RTIJ7iIUcq29939NBsLgKMyGCEk")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{"type":"service_account","project_id":"casa-do-pao-frances-api","private_key_id":"7ca080458287b9444374a2a0138a460da61e937f","private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCgTpcUCBeVfZ3H\\njdHUlJtFKDsk6ANhZQV+OkfbR81WnG6YZyx4r4RSd6nDSodcRq9tiGpuixe6daE4\\ntj3GKhZm69L6b0slI5rXJ9BG+DbHHplIDX+pOZ2FYeZeWhV2dUNs3u2bM5i6C2Ba\\nLiDjSK0k5MosDbYgDTBOxtjiCICzc6P1fm9m0vSoXSCXKwjUsVj0hcjH9Lwv7kGr\\nHfJ9lgQE9rT7wc9hweltUFiZWaSTwAzEJpWzYr4y4cP7bLuDOtdee/wy1dJwjAop\\nHHNqZLROHNj0hX7CrPGxOVQE3W/uOf8oK5sd4xAPHthwWharM8Q403pM0MsdktwG\\nY/+a01fNAgMBAAECggEARm6BHkH36qxIODbtLBMmrRnh8nMlmRMDeNQuYf+IDjeo\\nt7kM5vFml70Pj0gddMNxrBQ1fuAJytiHvx0CwyAWu519Ep73Sxf7nfBWJ/hCSPX+\\nrpOPtVAlD0dWKbo2l9cpipnfl0LyJTt+V+DQfkueFwmWcgiMLkTdJp9jBtxpf23q\\nWQ7XSCKsApKhzqzBFa8a2ykawOLPsEZuRuDo7vTMPhCWEL1vstWylRPFDDxRaJ0l\\nKxVjkfOYMf2cTlByeOxeGVl8/Y6sijtMqLuI0T49A5qP7fr0f/g2Cj3ow1jdospj\\nnPN9L1tolk0gdwFdzjPDXi5GbEu5hXAKWnJA8nX5mQKBgQDh2LiRa9eIWt/pgsxz\\nwvG7MqJ9c0A22sJ6xtAM5/JIVsgAYm+hoIcqYCm3zsEfI3x8FK+CTC/7nzfTIFj7\\n0c2LEOPA8td8mGP57i7q5iQqt37L3wckU1N3UH5YYwXEuj18zygHlWl5msZ+SAph\\nVsvtWqwmH9UfXQcbw8zkRNKCpwKBgQC1tcWiB8R1jkd1VrUJutAqftWRVi9VGYNY\\nhz5EwJEEL4R//U+LDUS6FVzg1xoQAFekdNWq3yRNaxaVQ5cKT00fTPnZSFF2gDp+\\nsD+Uvkyb2fEc0NTWjywL2BkS1/j7hmvMxOJpoeWujQvQWYy+tFKhPUUbgEUuYeGV\\nhuIvgvbkawKBgDTwWgMsZi8+LfJMiKQx8/vPWKtTUqAJE0E4TRhZXj96qBL+/+/A\\n8y4JsH23ZylnZgynxKQkO7MdlTZWBMWyXh3U7a4SvlQkXHr/S9wf6iZhMMWVF9V5\\n+ryjD5qkS3vbtAIHhPiSG1E36IM9W8GJWO/gKy4clBZv9fSaJvLy9u1NAoGBAIIP\\nuocwohk2nsVJK8nsEmXoZPtjQfvaiB4Mp7BUWTgyvtdRu+aet6ut8M3qiPgdFp5b\\nFjj5ASX82aw7NdgmTOBzm34/+jckrznQ86GG2JTRWXizrTRqRC+yHLhVKBz46R4n\\napwLSrg2stcN0eUKcv6AOX/mvx3k56+8XRd+2TNDAoGASdGW7PDCp5gN7xBPkh6f\\nViloesIU4IDc9XmPz8axkBNioTQRXWjfinLH+ioxxz+7Y1TpM/kCxF0rRyWGrBao\\n5gNLSBvBsgBnfvP6XoK6B1mbUwq3R7ryQFU3CW9pH/IdatACggQILV34t4eiB+VG\\n1xb/k/YoAgbPfK5itjdiyPc=\\n-----END PRIVATE KEY-----\\n","client_email":"render-pao-service@casa-do-pao-frances-api.iam.gserviceaccount.com","client_id":"110326819022887151274","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/render-pao-service%40casa-do-pao-frances-api.iam.gserviceaccount.com","universe_domain":"googleapis.com"}
+")
+
+
 # =====================
 # Configurações gerais
 # =====================
@@ -176,6 +182,9 @@ def create_order(payload: OrderIn):
         cur.execute("INSERT INTO order_items(order_id,product_id,qty,price) VALUES(?,?,?,?)",
                     (order_id, it.id, it.qty, price))
     conn.commit()
+    # Envia automaticamente para Google Sheets (se configurado)
+    _append_to_gsheet_safe(order_id, payload, db_products, total, entrega)
+
 
     return {"order_id": order_id, "total": total, "checkout_url": checkout_url,
             "mode": payload.mode, "delivery_date": entrega}
@@ -183,6 +192,46 @@ def create_order(payload: OrderIn):
 # =====================
 # Admin / Exportação / Status
 # =====================
+
+def _append_to_gsheet(row):
+    """Adiciona uma linha na planilha Google Sheets"""
+    if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
+        return
+    try:
+        from google.oauth2.service_account import Credentials
+        import gspread
+        info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        creds = Credentials.from_service_account_info(
+            info, scopes=["https://docs.google.com/spreadsheets/d/e/2PACX-1vROixlMMZdI-t4Bc-4yBC5fZVggwFz_zk7ERpjO0bSiSz3tE5JQxZM83LcELU0IfdoNo2nIS3UlWU3z/pubhtml"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+        ws = sh.sheet1
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print("GSHEETS ERROR:", e)
+
+def _append_to_gsheet_safe(order_id: int, payload, db_products: dict, total: float, entrega: str | None):
+    """Prepara e envia o pedido para o Google Sheets"""
+    try:
+        items_join = "; ".join([f"{db_products[it.id][0]} x{it.qty}" for it in payload.items])
+        _append_to_gsheet([
+            order_id,
+            payload.customer.nome,
+            payload.customer.telefone,
+            payload.customer.endereco or "",
+            total,
+            payload.mode,
+            entrega or "",
+            "pending",
+            items_join
+        ])
+    except Exception as e:
+        print("GSHEETS APPEND ERROR:", e)
+
+
+
+
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 def require_admin(x_admin_token: Optional[str] = Header(None)) -> bool:
