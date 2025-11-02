@@ -209,7 +209,7 @@ def _append_to_gsheet(row):
         )
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
-        ws = sh.sheet1
+        ws = sh.worksheet("Pedidos")
         ws.append_row(row, value_input_option="USER_ENTERED")
         print(f"✅ Pedido enviado para Google Sheets: {row}")
     except Exception as e:
