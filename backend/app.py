@@ -317,3 +317,12 @@ def update_status(order_id: int, payload: StatusIn, x_admin_token: Optional[str]
     cur.execute("UPDATE orders SET status=? WHERE id=?", (payload.status, order_id))
     conn.commit()
     return {"ok": True, "id": order_id, "status": payload.status}
+
+@app.get("/test_gsheet")
+def test_gsheet():
+    try:
+        _append_to_gsheet(["TESTE", datetime.datetime.now().isoformat()])
+        return {"ok": True, "msg": "Linha de teste enviada"}
+    except Exception as e:
+        return {"error": str(e)}
+
