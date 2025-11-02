@@ -197,20 +197,24 @@ def create_order(payload: OrderIn):
 def _append_to_gsheet(row):
     """Adiciona uma linha na planilha Google Sheets"""
     if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
+        print("GSHEETS ERROR: Missing Google Sheets credentials or ID.")
         return
     try:
         from google.oauth2.service_account import Credentials
         import gspread
         info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         creds = Credentials.from_service_account_info(
-            info, scopes=["https://docs.google.com/spreadsheets/d/e/2PACX-1vROixlMMZdI-t4Bc-4yBC5fZVggwFz_zk7ERpjO0bSiSz3tE5JQxZM83LcELU0IfdoNo2nIS3UlWU3z/pubhtml"]
+            info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
         ws = sh.sheet1
         ws.append_row(row, value_input_option="USER_ENTERED")
+        print(f"✅ Pedido enviado para Google Sheets: {row}")
     except Exception as e:
         print("GSHEETS ERROR:", e)
+
 
 def _append_to_gsheet_safe(order_id: int, payload, db_products: dict, total: float, entrega: str | None):
     """Prepara e envia o pedido para o Google Sheets"""
