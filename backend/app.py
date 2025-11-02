@@ -319,10 +319,14 @@ def update_status(order_id: int, payload: StatusIn, x_admin_token: Optional[str]
     return {"ok": True, "id": order_id, "status": payload.status}
 
 @app.get("/test_gsheet")
+@app.post("/test_gsheet")
 def test_gsheet():
     try:
-        _append_to_gsheet(["TESTE", datetime.datetime.now().isoformat()])
-        return {"ok": True, "msg": "Linha de teste enviada"}
+        row = ["TESTE", datetime.datetime.now().isoformat()]
+        _append_to_gsheet(row)
+        print("✅ TESTE enviado ao Google Sheets:", row)
+        return {"ok": True, "msg": "Linha de teste enviada", "row": row}
     except Exception as e:
+        print("GSHEETS TEST ERROR:", e)
         return {"error": str(e)}
 
