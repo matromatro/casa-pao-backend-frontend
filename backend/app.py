@@ -194,6 +194,7 @@ def create_order(payload: OrderIn):
 # Admin / Exportação / Status
 # =====================
 
+
 def _append_to_gsheet(row):
     """Adiciona uma linha na planilha Google Sheets"""
     if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
@@ -214,7 +215,6 @@ def _append_to_gsheet(row):
         print(f"✅ Pedido enviado para Google Sheets: {row}")
     except Exception as e:
         print("GSHEETS ERROR:", e)
-
 
 def _append_to_gsheet_safe(order_id: int, payload, db_products: dict, total: float, entrega: str | None):
     """Prepara e envia o pedido para o Google Sheets"""
