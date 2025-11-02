@@ -6,7 +6,7 @@ from typing import List, Literal, Optional
 import sqlite3, os, datetime, csv, io, json
 
 # ===== Integração com Google Sheets =====
-GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "1tJW5BHQTq3a5O1w-RTIJ7iIUcq29939NBsLgKMyGCEk")
+GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 
