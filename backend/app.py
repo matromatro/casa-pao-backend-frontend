@@ -196,25 +196,35 @@ def create_order(payload: OrderIn):
 
 
 def _append_to_gsheet(row):
-    """Adiciona uma linha na planilha Google Sheets"""
+    """Testa e adiciona uma linha na planilha Google Sheets com logs detalhados"""
+    print("🚀 Iniciando envio ao Google Sheets...")
+    print("GOOGLE_SHEETS_ID:", GOOGLE_SHEETS_ID[:10], "...")
     if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
-        print("GSHEETS ERROR: Missing Google Sheets credentials or ID.")
+        print("GSHEETS ERROR: Missing ID or credentials.")
         return
+
     try:
         from google.oauth2.service_account import Credentials
         import gspread
         info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+        print("✅ JSON carregado, criando credenciais...")
         creds = Credentials.from_service_account_info(
-            info,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+            info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
+
         gc = gspread.authorize(creds)
+        print("✅ Autorizado, abrindo planilha...")
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+        print("✅ Planilha aberta:", sh.title)
         ws = sh.sheet1
+        print("✅ Aba selecionada:", ws.title)
         ws.append_row(row, value_input_option="USER_ENTERED")
-        print(f"✅ Pedido enviado para Google Sheets: {row}")
+        print("✅ Linha adicionada:", row)
     except Exception as e:
-        print("GSHEETS ERROR:", e)
+        import traceback
+        print("❌ ERRO AO ESCREVER NA PLANILHA:", repr(e))
+        traceback.print_exc()
+
 
 def _append_to_gsheet_safe(order_id: int, payload, db_products: dict, total: float, entrega: str | None):
     """Prepara e envia o pedido para o Google Sheets"""
