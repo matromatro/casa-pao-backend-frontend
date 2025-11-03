@@ -393,3 +393,16 @@ def gsdebug():
     except Exception as e:
         return {"ok": False, "error": repr(e)}
 
+@app.get("/envcheck")
+def envcheck():
+    import os, json
+    try:
+        info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}"))
+        return {
+            "client_email": info.get("client_email"),
+            "private_key_id": info.get("private_key_id")
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
