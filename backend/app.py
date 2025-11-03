@@ -199,7 +199,7 @@ def create_order(payload: OrderIn):
 
 
 def _append_to_gsheet(row):
-    """Testa e adiciona uma linha na planilha Google Sheets com logs detalhados"""
+    """Adiciona uma linha no Google Sheets com normalização robusta da credencial e logs claros."""
     print("🚀 Iniciando envio ao Google Sheets...")
     print("GOOGLE_SHEETS_ID:", GOOGLE_SHEETS_ID[:10], "...")
     if not GOOGLE_SHEETS_ID or not GOOGLE_SERVICE_ACCOUNT_JSON:
@@ -209,29 +209,53 @@ def _append_to_gsheet(row):
     try:
         from google.oauth2.service_account import Credentials
         import gspread
-        info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
-        print("✅ JSON carregado, criando credenciais...")
-        # Corrige a chave privada para ter quebras de linha reais
-        if "private_key" in info and "\\n" in info["private_key"]:
-            info["private_key"] = info["private_key"].replace("\\n", "\n")
-        
+
+        raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+
+        # 1) Garante que é JSON com aspas duplas
+        if raw.startswith("'") and raw.endswith("'"):
+            raw = raw[1:-1]
+        if raw.startswith("“") and raw.endswith("”"):
+            raw = raw[1:-1]
+        if raw.startswith("”") and raw.endswith("“"):
+            raw = raw[1:-1]
+
+        # 2) Tenta decodificar
+        info = json.loads(raw)
+
+        # 3) Normaliza a chave privada: converte \\n -> \n e remove \r
+        pk = info.get("private_key", "")
+        if isinstance(pk, str):
+            # Se veio com as barras literais, converte para quebra real:
+            pk = pk.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
+            info["private_key"] = pk
+
+        # 4) Cria credenciais com o escopo correto do Sheets
         creds = Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
 
-
+        # 5) Abre planilha e escreve na primeira aba
         gc = gspread.authorize(creds)
         print("✅ Autorizado, abrindo planilha...")
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
         print("✅ Planilha aberta:", sh.title)
-        ws = sh.sheet1
+
+        try:
+            ws = sh.sheet1
+        except Exception:
+            # fallback caso a ordem de abas tenha mudado
+            ws = sh.get_worksheet(0)
+
         print("✅ Aba selecionada:", ws.title)
         ws.append_row(row, value_input_option="USER_ENTERED")
         print("✅ Linha adicionada:", row)
+
     except Exception as e:
         import traceback
         print("❌ ERRO AO ESCREVER NA PLANILHA:", repr(e))
         traceback.print_exc()
+
 
 
 def _append_to_gsheet_safe(order_id: int, payload, db_products: dict, total: float, entrega: str | None):
@@ -347,4 +371,25 @@ def test_gsheet():
     except Exception as e:
         print("GSHEETS TEST ERROR:", e)
         return {"error": str(e)}
+@app.get("/gsdebug")
+def gsdebug():
+    try:
+        from google.oauth2.service_account import Credentials
+        import gspread
+        info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON.strip())
+        # Normaliza PK aqui também
+        pk = info.get("private_key", "")
+        if isinstance(pk, str):
+            pk = pk.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
+            info["private_key"] = pk
+
+        creds = Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+        sheets = [ws.title for ws in sh.worksheets()]
+        return {"ok": True, "spreadsheet_title": sh.title, "tabs": sheets}
+    except Exception as e:
+        return {"ok": False, "error": repr(e)}
 
