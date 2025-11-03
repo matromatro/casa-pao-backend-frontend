@@ -5,17 +5,7 @@ from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 import sqlite3, os, datetime, csv, io, json
 
-# --- DEBUG GOOGLE JSON ---
-try:
-    import json
-    j = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-    print("DEBUG JSON LENGTH:", len(j))
-    if j:
-        parsed = json.loads(j)
-        print("PRIVATE KEY LENGTH:", len(parsed.get("private_key", "")))
-        print("PRIVATE KEY PREVIEW:", repr(parsed.get("private_key", "")[:50]))
-except Exception as e:
-    print("JSON ERROR:", e)
+
 
 
 # ===== Integração com Google Sheets =====
@@ -221,9 +211,14 @@ def _append_to_gsheet(row):
         import gspread
         info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
         print("✅ JSON carregado, criando credenciais...")
+        # Corrige a chave privada para ter quebras de linha reais
+        if "private_key" in info and "\\n" in info["private_key"]:
+            info["private_key"] = info["private_key"].replace("\\n", "\n")
+        
         creds = Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
+
 
         gc = gspread.authorize(creds)
         print("✅ Autorizado, abrindo planilha...")
