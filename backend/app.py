@@ -198,6 +198,45 @@ def create_order(payload: OrderIn):
 # =====================
 
 
+def _load_service_account_info() -> dict:
+    raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
+    if not raw:
+        raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON")
+
+    if raw.startswith("'") and raw.endswith("'"):
+        raw = raw[1:-1]
+    if raw.startswith("“") and raw.endswith("”"):
+        raw = raw[1:-1]
+    if raw.startswith("”") and raw.endswith("“"):
+        raw = raw[1:-1]
+
+    info = json.loads(raw)
+    pk = info.get("private_key", "")
+    if isinstance(pk, str):
+        pk = (
+            pk.replace("\r\n", "\n")
+            .replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+        )
+        info["private_key"] = pk
+    return info
+
+
+def _authorize_gspread():
+    if not GOOGLE_SHEETS_ID:
+        raise ValueError("Missing GOOGLE_SHEETS_ID")
+
+    info = _load_service_account_info()
+
+    from google.oauth2.service_account import Credentials
+    import gspread
+
+    creds = Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    return gspread.authorize(creds)
+
+
 def _append_to_gsheet(row):
     """Adiciona uma linha no Google Sheets com normalização robusta da credencial e logs claros."""
     print("🚀 Iniciando envio ao Google Sheets...")
@@ -207,36 +246,7 @@ def _append_to_gsheet(row):
         return
 
     try:
-        from google.oauth2.service_account import Credentials
-        import gspread
-
-        raw = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-
-        # 1) Garante que é JSON com aspas duplas
-        if raw.startswith("'") and raw.endswith("'"):
-            raw = raw[1:-1]
-        if raw.startswith("“") and raw.endswith("”"):
-            raw = raw[1:-1]
-        if raw.startswith("”") and raw.endswith("“"):
-            raw = raw[1:-1]
-
-        # 2) Tenta decodificar
-        info = json.loads(raw)
-
-        # 3) Normaliza a chave privada: converte \\n -> \n e remove \r
-        pk = info.get("private_key", "")
-        if isinstance(pk, str):
-            # Se veio com as barras literais, converte para quebra real:
-            pk = pk.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
-            info["private_key"] = pk
-
-        # 4) Cria credenciais com o escopo correto do Sheets
-        creds = Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-
-        # 5) Abre planilha e escreve na primeira aba
-        gc = gspread.authorize(creds)
+        gc = _authorize_gspread()
         print("✅ Autorizado, abrindo planilha...")
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
         print("✅ Planilha aberta:", sh.title)
@@ -374,19 +384,7 @@ def test_gsheet():
 @app.get("/gsdebug")
 def gsdebug():
     try:
-        from google.oauth2.service_account import Credentials
-        import gspread
-        info = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON.strip())
-        # Normaliza PK aqui também
-        pk = info.get("private_key", "")
-        if isinstance(pk, str):
-            pk = pk.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
-            info["private_key"] = pk
-
-        creds = Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        gc = gspread.authorize(creds)
+        gc = _authorize_gspread()
         sh = gc.open_by_key(GOOGLE_SHEETS_ID)
         sheets = [ws.title for ws in sh.worksheets()]
         return {"ok": True, "spreadsheet_title": sh.title, "tabs": sheets}
